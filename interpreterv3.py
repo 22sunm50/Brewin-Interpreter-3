@@ -149,7 +149,7 @@ class Interpreter(InterpreterBase):
                 f"Type mismatch in return value: Expected {return_type}, got {return_val.type() if return_val else 'nil'}")
 
         # CHECK: return type void
-        if return_type == "void" and return_val.type() != "nil":
+        if return_type == "void" and return_val.type() != "nil": # 🍅 🍅 🍅: what should return val be if void??
             super().error(
                 ErrorType.TYPE_ERROR,
                 f"Type mismatch in return value: Expected {return_type}, got {return_val.type() if return_val else 'nil'}")
@@ -183,15 +183,55 @@ class Interpreter(InterpreterBase):
         value_obj = self.__eval_expr(assign_ast.get("expression"))
         if not self.env.set(var_name, value_obj):
             super().error(
-                ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment"
-            )
-    
+                ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment")
+            
+    def __assign(self, assign_ast):
+        var_name = assign_ast.get("name")
+        value_obj = self.__eval_expr(assign_ast.get("expression"))
+
+        # get the target var's curr val from the env
+        target_value = self.env.get(var_name)
+        if target_value is None:
+            super().error(ErrorType.NAME_ERROR, f"Undefined variable '{var_name}' in assignment")
+
+        target_type = target_value.type()
+        source_type = value_obj.type()
+
+        # CASE 1: same type assignment (primitive or struct)
+        if target_type == source_type:
+            self.env.set(var_name, value_obj)
+            return
+
+        # CASE 2: struct can be assigned nil
+        if target_type in self.struct_definitions and source_type == Type.NIL: # 🍅 🍅 🍅: or? not necessarily nil i think
+            self.env.set(var_name, value_obj)
+            return
+
+        # CASE 3: coercion from int -> bool
+        if target_type == Type.BOOL and source_type == Type.INT:
+            coerced_value = Value(Type.BOOL, value_obj.value() != 0)
+            self.env.set(var_name, coerced_value)
+            return
+
+        # If none of the valid cases apply, raise a type error
+        super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{source_type}' to '{target_type}'")
+
+          
     def __var_def(self, var_ast):
         var_name = var_ast.get("name")
-        if not self.env.create(var_name, Interpreter.NIL_VALUE):
-            super().error(
-                ErrorType.NAME_ERROR, f"Duplicate definition for variable {var_name}"
-            )
+        var_type = var_ast.get("var_type")
+
+        # validate the var type
+        valid_types = ["int", "string", "bool"] + list(self.struct_definitions.keys())
+        if var_type not in valid_types:
+            super().error(ErrorType.TYPE_ERROR, f"Invalid type '{var_type}' for variable '{var_name}'")
+
+        # get default val based on type
+        default_value = self.get_default_val(var_name, var_type)
+
+        # create the var in the env w the default val
+        if not self.env.create(var_name, default_value):
+            super().error(ErrorType.NAME_ERROR, f"Duplicate definition for variable '{var_name}'")
 
     def __eval_expr(self, expr_ast):
         if expr_ast.elem_type == InterpreterBase.NIL_NODE:
@@ -407,24 +447,35 @@ class Interpreter(InterpreterBase):
             raise TypeError("Expected a struct instance.")
         struct_instance.set_field(field_name, value)
 
+    def get_default_val(self, var_name, var_type):
+        if var_type == "int":
+            default_value = Value(Type.INT, 0)
+        elif var_type == "string":
+            default_value = Value(Type.STRING, "")
+        elif var_type == "bool":
+            default_value = Value(Type.BOOL, False)
+        elif var_type in self.struct_definitions:
+            default_value = Interpreter.NIL_VALUE
+        else:
+            # This case should be unreachable because of the earlier type check
+            super().error(ErrorType.TYPE_ERROR, f"Unknown type '{var_type}' for variable '{var_name}'")
+        return default_value
+
+
 def main():
   program = """
-func foo(a:int, b:string, c:int, d:bool) : int {
-  print(b, d);
-  return a + c;
-}
-
-func talk_to(name:string): void {
-  if (name == "Carey") {
-     print("Go away!");
-     return;  /* using return is OK w/void, just don't specify a value */
-  }
-  print("Greetings");
+func foo(coerced:bool): void {
+    print(coerced);
 }
 
 func main() : void {
-  print(foo(10, "blah", 20, false));
-  talk_to("Bonnie");
+    var x: int;
+    var y: bool;
+    x = 10;         /* Valid (int → int) */
+    y = x;          /* Valid (int → bool coercion) */
+    print("y = ", y);
+    print ("x = ", x);
+    y = "hello";    /* Error (string → bool) */
 }
                 """
   interpreter = Interpreter()
