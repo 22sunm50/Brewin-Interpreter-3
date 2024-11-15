@@ -7,6 +7,7 @@ class Type:
     BOOL = "bool"
     STRING = "string"
     NIL = "nil"
+    VOID = "void"
 
 ################ VALUE ################
 # Represents a value, which has a type and its value
@@ -16,6 +17,8 @@ class Value:
         self.v = value
 
     def value(self):
+        if self.t == Type.VOID:
+            return None # VOID doesn't have any meaningful value
         return self.v
 
     def type(self):
@@ -28,6 +31,8 @@ def create_value(val):
         return Value(Type.BOOL, False)
     elif val == InterpreterBase.NIL_DEF:
         return Value(Type.NIL, None)
+    elif val == InterpreterBase.VOID_DEF:
+        return Value(Type.VOID, None)
     elif isinstance(val, str):
         return Value(Type.STRING, val)
     elif isinstance(val, int):
@@ -45,6 +50,10 @@ def get_printable(val):
         if val.value() is True:
             return "true"
         return "false"
+    if val.type() == Type.VOID:
+        return "void"
+    if val.type() == Type.NIL:
+        return "nil"
     return None
 
 ################ STRUCT ################

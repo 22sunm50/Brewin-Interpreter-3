@@ -20,6 +20,7 @@ class Interpreter(InterpreterBase):
     # constants
     NIL_VALUE = create_value(InterpreterBase.NIL_DEF)
     TRUE_VALUE = create_value(InterpreterBase.TRUE_DEF)
+    VOID_VALUE = create_value(InterpreterBase.VOID_DEF)
     BIN_OPS = {"+", "-", "*", "/", "==", "!=", ">", ">=", "<", "<=", "||", "&&"}
 
     # methods
@@ -37,11 +38,16 @@ class Interpreter(InterpreterBase):
 
     def __set_up_function_table(self, ast):
         self.func_name_to_ast = {}
+        # print(f"📚: ast.get('functions') = {ast.get('functions')}")
         for func_def in ast.get("functions"):
             func_name = func_def.get("name")
             num_params = len(func_def.get("args"))
             return_type = func_def.get("return_type")
             param_types = [arg.get("var_type") for arg in func_def.get("args")]
+            # print(f"📚: func_name = {func_name}")
+            # print(f"📚: num_params = {num_params}")
+            # print(f"📚: return_type = {return_type}")
+            # print(f"📚: param_types = {param_types}")
 
             # validate before adding to the self.func_name_to_ast
             self.__validate_func_types(param_types, return_type)
@@ -67,12 +73,12 @@ class Interpreter(InterpreterBase):
             )
         return candidate_funcs[num_params]
 
-    def __run_statements(self, statements):
+    def __run_statements(self, statements, return_type=None):
         self.env.push_block()
         for statement in statements:
             if self.trace_output:
                 print(statement)
-            status, return_val = self.__run_statement(statement)
+            status, return_val = self.__run_statement(statement, return_type)
             if status == ExecStatus.RETURN:
                 self.env.pop_block()
                 return (status, return_val)
@@ -80,7 +86,7 @@ class Interpreter(InterpreterBase):
         self.env.pop_block()
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
-    def __run_statement(self, statement):
+    def __run_statement(self, statement, return_type=None): # 🍅: added an optional return type parameter
         status = ExecStatus.CONTINUE
         return_val = None
         if statement.elem_type == InterpreterBase.FCALL_NODE:
@@ -90,7 +96,7 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == InterpreterBase.VAR_DEF_NODE:
             self.__var_def(statement)
         elif statement.elem_type == InterpreterBase.RETURN_NODE:
-            status, return_val = self.__do_return(statement)
+            status, return_val = self.__do_return(statement, return_type)
         elif statement.elem_type == Interpreter.IF_NODE:
             status, return_val = self.__do_if(statement)
         elif statement.elem_type == Interpreter.FOR_NODE:
@@ -115,46 +121,71 @@ class Interpreter(InterpreterBase):
         param_types = func_info["param_types"]
         return_type = func_info["return_type"]
 
+        # prepare args to pass to the func (by type checking)
+        prepared_args = {}
+        for i, (formal_arg, actual_arg) in enumerate(zip(formal_args, actual_args)):
+            actual_value = self.__eval_expr(actual_arg)
+            actual_type = actual_value.type()
+            expected_type = param_types[i]
+            arg_name = formal_arg.get("name")
+
+            # TYPE CHECKING:
+            # CASE 1: same type, pass directly
+            if actual_type == expected_type:
+                if expected_type in ["int", "string", "bool"]: # primitive
+                    # pass by value (copy)
+                    prepared_args[arg_name] = copy.copy(actual_value)
+                else: # struct
+                    # pass by ref (struct) 🍅 🍅 🍅 OBJ REF???? 🍅 🍅 🍅
+                    prepared_args[arg_name] = actual_value
+            # CASE 2: coercion: int -> bool
+            elif expected_type == Type.BOOL and actual_type == Type.INT:
+                coerced_value = Value(Type.BOOL, actual_value.value() != 0)
+                prepared_args[arg_name] = coerced_value
+            # CASE 3:: nil can be assigned to struct param
+            elif expected_type in self.struct_definitions and actual_type == Type.NIL:
+                prepared_args[arg_name] = actual_value
+            # Type Mismatch
+            else:
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    f"Type mismatch: Expected {expected_type}, got {actual_value.type()} for argument '{arg_name}'")
+                
         # CHECK: func w/ arg len exists
         if len(actual_args) != len(formal_args):
             super().error(
                 ErrorType.NAME_ERROR,
                 f"Function {func_ast.get('name')} with {len(actual_args)} args not found")
 
-        # CHECK: if arg type match expected param types
-        for i, (formal_arg, actual_arg) in enumerate(zip(formal_args, actual_args)):
-            actual_value = copy.copy(self.__eval_expr(actual_arg)) # create new Value obj that references the same underlying data
-            expected_type = param_types[i]
-
-            if actual_value.type() != expected_type:
-                super().error(
-                    ErrorType.TYPE_ERROR,
-                    f"Type mismatch: Expected {expected_type}, got {actual_value.type()} for argument '{formal_arg.get('name')}'")
-
-        # create new activation record and bind formal arguments to actual values
+        # create a new func scope
         self.env.push_func()
-        for formal_arg, actual_arg in zip(formal_args, actual_args):
-            arg_name = formal_arg.get("name")
-            arg_value = copy.copy(self.__eval_expr(actual_arg)) # 🍅: CHECK BACK IF EVAL EXPR TWICE IS AN ISSUE
-            self.env.create(arg_name, arg_value)
 
-        # execute func statements
-        status, return_val = self.__run_statements(func_ast.get("statements"))
+        # bind formal params to the prepared args
+        for arg_name, value in prepared_args.items():
+            self.env.create(arg_name, value)
+
+        # execute rest of func statements
+        status, return_val_obj = self.__run_statements(func_ast.get("statements"), return_type)
         self.env.pop_func()
 
+        # handle default ret val if the func runs to completion
+        if status != ExecStatus.RETURN:
+            return_val_obj = self.get_default_val("return", return_type)
+
         # CHECK: return type
-        if (return_type != "void" and (return_val is None or return_val.type() != return_type)):
+        if return_type != "void" and (return_val_obj.value() == Interpreter.VOID_VALUE.value() or return_val_obj.type() != return_type): # 🍅 🍅 🍅: what should return val be if void??
             super().error(
                 ErrorType.TYPE_ERROR,
-                f"Type mismatch in return value: Expected {return_type}, got {return_val.type() if return_val else 'nil'}")
+                f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.type()}")
 
-        # CHECK: return type void
-        if return_type == "void" and return_val.type() != "nil": # 🍅 🍅 🍅: what should return val be if void??
-            super().error(
-                ErrorType.TYPE_ERROR,
-                f"Type mismatch in return value: Expected {return_type}, got {return_val.type() if return_val else 'nil'}")
+        # # 🍅 🍅 🍅: NOT RLLY SURE HOW TO HANDLE VOID YET
+        # # CHECK: return type void
+        # if return_type == "void" and return_val_obj.value() != Interpreter.VOID_VALUE.value(): # 🍅 🍅 🍅: what should return val be if void??
+        #     super().error(
+        #         ErrorType.TYPE_ERROR,
+        #         f"Type mismatch in return value, return_type = {return_type}: Expected {Interpreter.VOID_VALUE.value()}, got return_val_obj = {return_val_obj.value()} and ")
 
-        return return_val if return_type != "void" else Interpreter.NIL_VALUE
+        return return_val_obj if return_type != "void" else Interpreter.VOID_VALUE
 
     def __call_print(self, args):
         output = ""
@@ -177,13 +208,6 @@ class Interpreter(InterpreterBase):
             return Value(Type.INT, int(inp))
         if name == "inputs":
             return Value(Type.STRING, inp)
-
-    def __assign(self, assign_ast):
-        var_name = assign_ast.get("name")
-        value_obj = self.__eval_expr(assign_ast.get("expression"))
-        if not self.env.set(var_name, value_obj):
-            super().error(
-                ErrorType.NAME_ERROR, f"Undefined variable {var_name} in assignment")
             
     def __assign(self, assign_ast):
         var_name = assign_ast.get("name")
@@ -215,8 +239,7 @@ class Interpreter(InterpreterBase):
 
         # If none of the valid cases apply, raise a type error
         super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{source_type}' to '{target_type}'")
-
-          
+        
     def __var_def(self, var_ast):
         var_name = var_ast.get("name")
         var_type = var_ast.get("var_type")
@@ -402,12 +425,45 @@ class Interpreter(InterpreterBase):
 
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
-    def __do_return(self, return_ast):
+    # def __do_return(self, return_ast):
+    #     expr_ast = return_ast.get("expression")
+    #     if expr_ast is None:
+    #         return (ExecStatus.RETURN, Interpreter.VOID_VALUE) # for void funcs
+    #     value_obj = copy.copy(self.__eval_expr(expr_ast))
+    #     return (ExecStatus.RETURN, value_obj)
+
+    def __do_return(self, return_ast, return_type):
         expr_ast = return_ast.get("expression")
+
+        # if there is no return expression, return the default value for the return type
         if expr_ast is None:
-            return (ExecStatus.RETURN, Interpreter.NIL_VALUE)
-        value_obj = copy.copy(self.__eval_expr(expr_ast))
-        return (ExecStatus.RETURN, value_obj)
+            return (ExecStatus.RETURN, self.get_default_val("return", return_type))
+
+        return_val_obj = copy.copy(self.__eval_expr(expr_ast))
+        return_val_type = return_val_obj.type()
+
+        # Type Checking
+        # CASE 1: exact type match
+        if return_val_type == return_type:
+            return (ExecStatus.RETURN, return_val_obj)
+
+        # CASE 2: coercion from int -> bool
+        if return_type == Type.BOOL and return_val_type == Type.INT:
+            coerced_value = Value(Type.BOOL, return_val_obj.value() != 0)
+            return (ExecStatus.RETURN, coerced_value)
+
+        # CASE 3: return nil for a user-defined structure
+        if return_type in self.struct_definitions and return_val_type == Type.NIL:
+            return (ExecStatus.RETURN, return_val_obj)
+
+        # If none of the cases match, raise a type error
+        super().error(
+            ErrorType.TYPE_ERROR,
+            f"Type mismatch in return value: Expected {return_type}, got {return_val_type}"
+        )
+
+        return (ExecStatus.RETURN, return_val_obj)
+
 
     def __validate_func_types(self, param_types, return_type):
         # 🍅 🍅 🍅 🍅 🍅 🍅 🍅 🍅 🍅 🍅 IMPLEMENT STRUCTS LATER
@@ -456,6 +512,8 @@ class Interpreter(InterpreterBase):
             default_value = Value(Type.BOOL, False)
         elif var_type in self.struct_definitions:
             default_value = Interpreter.NIL_VALUE
+        elif var_type == "void":
+            return Interpreter.VOID_VALUE
         else:
             # This case should be unreachable because of the earlier type check
             super().error(ErrorType.TYPE_ERROR, f"Unknown type '{var_type}' for variable '{var_name}'")
@@ -464,18 +522,18 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func foo(coerced:bool): void {
-    print(coerced);
+func bar() : int {
+  return;  /* no return value specified - returns 0 */
 }
-
+func bletch() : bool {
+    print("hi");
+    /* no explicit return; bletch must return default bool of false */
+}
 func main() : void {
-    var x: int;
-    var y: bool;
-    x = 10;         /* Valid (int → int) */
-    y = x;          /* Valid (int → bool coercion) */
-    print("y = ", y);
-    print ("x = ", x);
-    y = "hello";    /* Error (string → bool) */
+    var val: int;
+    val = bar();
+    print(val);  /* prints 0 */
+    print(bletch()); /* prints false */
 }
                 """
   interpreter = Interpreter()
