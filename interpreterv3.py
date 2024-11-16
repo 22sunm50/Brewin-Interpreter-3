@@ -210,20 +210,19 @@ class Interpreter(InterpreterBase):
         var_name = assign_ast.get("name")
         value_obj = self.__eval_expr(assign_ast.get("expression"))
 
-        # handle if var name is a struct field (contains '.') # 🍅: does it handle nested struct access?
+        # handle if var name is a struct field (contains '.')
         if "." in var_name:
-            struct_var_name, field_name = var_name.split(".")
+            field_path = var_name.split(".")
+            struct_instance = self.__resolve_nested_struct(field_path[:-1])
+            field_name = field_path[-1]
 
-            # Retrieve the struct instance from the environment
-            struct_instance = self.env.get(struct_var_name)
-
+            # CHECK: if the struct instance is valid
             if struct_instance is None or struct_instance.type() == Type.NIL:
-                super().error(ErrorType.FAULT_ERROR, f"Attempted to assign a field on a nil reference '{struct_var_name}'.")
-
+                super().error(ErrorType.FAULT_ERROR, f"Attempted to assign a field on a nil reference '{field_path[:-1]}'.")
             if not isinstance(struct_instance, StructValue):
-                super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
+                super().error(ErrorType.TYPE_ERROR, f"Variable '{field_path[:-1]}' is not a struct.")
 
-            # Get the expected field type from the struct definition
+            # get the expected field type
             struct_type = struct_instance.struct_type
             if field_name not in struct_type.fields:
                 super().error(ErrorType.NAME_ERROR, f"Field '{field_name}' does not exist in struct '{struct_type.name}'.")
@@ -231,13 +230,62 @@ class Interpreter(InterpreterBase):
             expected_field_type = struct_type.fields[field_name]
             value_type = value_obj.type()
 
-            # TYPE CHECK: field assignment
-            if value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
+            # # TYPE CHECK: for field assignment
+            # if value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
+            #     super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{value_type}' to field '{field_name}' of type '{expected_field_type}'.")
+
+            if isinstance(value_obj, StructValue):
+                if value_obj.struct_type.name != expected_field_type:
+                    super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign struct instance of type '{value_obj.struct_type.name}' to field '{field_name}' of type '{expected_field_type}'.")
+            elif value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
                 super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{value_type}' to field '{field_name}' of type '{expected_field_type}'.")
 
-            # do field assignment
+
+
+            # perform the field assignment
             struct_instance.set_field(field_name, value_obj)
             return
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+            # struct_var_name, field_name = var_name.split(".")
+
+            # # Retrieve the struct instance from the environment
+            # struct_instance = self.env.get(struct_var_name)
+
+            # if struct_instance is None or struct_instance.type() == Type.NIL:
+            #     super().error(ErrorType.FAULT_ERROR, f"Attempted to assign a field on a nil reference '{struct_var_name}'.")
+
+            # if not isinstance(struct_instance, StructValue):
+            #     super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
+
+            # # Get the expected field type from the struct definition
+            # struct_type = struct_instance.struct_type
+            # if field_name not in struct_type.fields:
+            #     super().error(ErrorType.NAME_ERROR, f"Field '{field_name}' does not exist in struct '{struct_type.name}'.")
+
+            # expected_field_type = struct_type.fields[field_name]
+            # value_type = value_obj.type()
+
+            # # TYPE CHECK: field assignment
+            # if value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
+            #     super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{value_type}' to field '{field_name}' of type '{expected_field_type}'.")
+
+            # # do field assignment
+            # struct_instance.set_field(field_name, value_obj)
+            # return
 
         # regular var assignment (non-struct)
         # target is the var being changed
@@ -252,11 +300,7 @@ class Interpreter(InterpreterBase):
         if target_type == source_type:
             self.env.set(var_name, value_obj)
             return
-        
-        # print(f"📋: var_name = {var_name}")
-        # print(f"📋: target_type = {target_type}")
-        # print(f"📋: value_obj = {value_obj}")
-        # print(f"📋: value_obj.struct_type.name = {value_obj.struct_type.name}")
+
         # CASE 2: struct assignment (assigning a new struct instance to a var intialized w nil)
         if (target_type in self.struct_definitions or target_type == Type.NIL) and isinstance(value_obj, StructValue):
             # ensure the struct types match
@@ -310,14 +354,31 @@ class Interpreter(InterpreterBase):
             # 🍅: DO I NEED THIS FOR THE STRUCT FIELD ASSIGNMENT??
             # check if var name is a struct field
             if "." in var_name:
-                struct_var_name, field_name = var_name.split('.')
-                # get struct instance from the env
-                struct_instance = self.env.get(struct_var_name)
+                field_path = var_name.split(".")
+                struct_instance = self.__resolve_nested_struct(field_path[:-1])
+                field_name = field_path[-1]
+
                 if struct_instance is None or struct_instance.type() == Type.NIL:
-                    super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil reference: struct_var_name = '{struct_var_name}'.")
-                if not isinstance (struct_instance, StructValue):
-                    super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
+                    super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil reference: '{field_path[:-1]}'.")
+                if not isinstance(struct_instance, StructValue):
+                    super().error(ErrorType.TYPE_ERROR, f"Variable '{field_path[:-1]}' is not a struct.")
+
                 return struct_instance.get_field(field_name)
+
+
+
+
+
+
+
+                # struct_var_name, field_name = var_name.split('.')
+                # # get struct instance from the env
+                # struct_instance = self.env.get(struct_var_name)
+                # if struct_instance is None or struct_instance.type() == Type.NIL:
+                #     super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil reference: struct_var_name = '{struct_var_name}'.")
+                # if not isinstance (struct_instance, StructValue):
+                #     super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
+                # return struct_instance.get_field(field_name)
 
             # regular var access
             val = self.env.get(var_name)
@@ -562,25 +623,39 @@ class Interpreter(InterpreterBase):
                 fields[field_name] = field_type
             self.struct_definitions[struct_name] = StructType(struct_name, fields)
 
+    def __resolve_nested_struct(self, field_path):
+        struct_instance = self.env.get(field_path[0])
+
+        # Traverse each field in the path
+        for field_name in field_path[1:]:
+            if struct_instance is None or struct_instance.type() == Type.NIL:
+                super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil reference: '{field_name}'.")
+            if not isinstance(struct_instance, StructValue):
+                super().error(ErrorType.TYPE_ERROR, f"Variable '{field_name}' is not a struct.")
+
+            struct_instance = struct_instance.get_field(field_name)
+
+        return struct_instance
+
 
 def main():
   program = """
+struct Cat {
+  name: string;
+}
 
 struct Person {
   name: string;
   kitty: Cat;
 }
 
-struct Cat {
-  name: string;
-}
-
 func main() : void {
     var p : Person;
     p = new Person;
     p.name = "Michelle";
-    p.kitty.name = "Lanmei";
     print(p.name);
+    p.kitty = new Cat;
+    p.kitty.name = "Lanmei";
     print(p.kitty.name);
     return;
 }
