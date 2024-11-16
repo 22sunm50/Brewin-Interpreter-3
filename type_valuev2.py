@@ -75,13 +75,13 @@ class StructValue:
     def get_default_value(self, field_type, struct_def_list):
         # Initialize fields with default values based on their type
         if field_type == "int":
-            return 0
+            return Value(Type.INT, 0)
         elif field_type == "bool":
-            return False
+            return Value(Type.BOOL, False)
         elif field_type == "string":
-            return ""
-        elif field_type in struct_def_list:  # 🍅 User-defined struct (passed in list)
-            return InterpreterBase.NIL_DEF
+            return Value(Type.STRING, "")
+        elif field_type in struct_def_list:  # 🍅 user-defined/nested struct (passed in list)
+            return create_value(InterpreterBase.NIL_DEF)
         else:
             raise ValueError(f"Unknown field type: {field_type}")
 
@@ -94,3 +94,6 @@ class StructValue:
         if field_name not in self.fields:
             raise ValueError(f"Field '{field_name}' does not exist in struct '{self.struct_type.name}'")
         self.fields[field_name] = value
+
+    def type(self):
+        return self.struct_type

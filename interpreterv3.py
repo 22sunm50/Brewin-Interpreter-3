@@ -33,21 +33,18 @@ class Interpreter(InterpreterBase):
     def run(self, program):
         ast = parse_program(program)
         self.__set_up_function_table(ast)
+        self.__set_up_struct_definitions(ast)
+        # print(f"🏡: self.struct_definitions {self.struct_definitions}")
         self.env = EnvironmentManager()
         self.__call_func_aux("main", [])
 
     def __set_up_function_table(self, ast):
         self.func_name_to_ast = {}
-        # print(f"📚: ast.get('functions') = {ast.get('functions')}")
         for func_def in ast.get("functions"):
             func_name = func_def.get("name")
             num_params = len(func_def.get("args"))
             return_type = func_def.get("return_type")
             param_types = [arg.get("var_type") for arg in func_def.get("args")]
-            # print(f"📚: func_name = {func_name}")
-            # print(f"📚: num_params = {num_params}")
-            # print(f"📚: return_type = {return_type}")
-            # print(f"📚: param_types = {param_types}")
 
             # validate before adding to the self.func_name_to_ast
             self.__validate_func_types(param_types, return_type)
@@ -213,7 +210,37 @@ class Interpreter(InterpreterBase):
         var_name = assign_ast.get("name")
         value_obj = self.__eval_expr(assign_ast.get("expression"))
 
-        # get the target var's curr val from the env
+        # handle if var name is a struct field (contains '.') # 🍅: does it handle nested struct access?
+        if "." in var_name:
+            struct_var_name, field_name = var_name.split(".")
+
+            # Retrieve the struct instance from the environment
+            struct_instance = self.env.get(struct_var_name)
+
+            if struct_instance is None or struct_instance.type() == Type.NIL:
+                super().error(ErrorType.FAULT_ERROR, f"Attempted to assign a field on a nil reference '{struct_var_name}'.")
+
+            if not isinstance(struct_instance, StructValue):
+                super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
+
+            # Get the expected field type from the struct definition
+            struct_type = struct_instance.struct_type
+            if field_name not in struct_type.fields:
+                super().error(ErrorType.NAME_ERROR, f"Field '{field_name}' does not exist in struct '{struct_type.name}'.")
+
+            expected_field_type = struct_type.fields[field_name]
+            value_type = value_obj.type()
+
+            # TYPE CHECK: field assignment
+            if value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
+                super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{value_type}' to field '{field_name}' of type '{expected_field_type}'.")
+
+            # do field assignment
+            struct_instance.set_field(field_name, value_obj)
+            return
+
+        # regular var assignment (non-struct)
+        # target is the var being changed
         target_value = self.env.get(var_name)
         if target_value is None:
             super().error(ErrorType.NAME_ERROR, f"Undefined variable '{var_name}' in assignment")
@@ -225,19 +252,31 @@ class Interpreter(InterpreterBase):
         if target_type == source_type:
             self.env.set(var_name, value_obj)
             return
+        
+        # print(f"📋: var_name = {var_name}")
+        # print(f"📋: target_type = {target_type}")
+        # print(f"📋: value_obj = {value_obj}")
+        # print(f"📋: value_obj.struct_type.name = {value_obj.struct_type.name}")
+        # CASE 2: struct assignment (assigning a new struct instance to a var intialized w nil)
+        if (target_type in self.struct_definitions or target_type == Type.NIL) and isinstance(value_obj, StructValue):
+            # ensure the struct types match
+            if value_obj.struct_type.name != target_type and target_type != Type.NIL:
+                super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign struct instance of type '{value_obj.struct_type.name}' to variable of type '{target_type}'.")
+            self.env.set(var_name, value_obj)
+            return
 
-        # CASE 2: struct can be assigned nil
+        # CASE 3: struct can be assigned nil
         if target_type in self.struct_definitions and source_type == Type.NIL: # 🍅 🍅 🍅: or? not necessarily nil i think
             self.env.set(var_name, value_obj)
             return
 
-        # CASE 3: coercion from int -> bool
+        # CASE 4: coercion from int -> bool
         if target_type == Type.BOOL and source_type == Type.INT:
             coerced_value = Value(Type.BOOL, value_obj.value() != 0)
             self.env.set(var_name, coerced_value)
             return
 
-        # If none of the valid cases apply, raise a type error
+        # mismatch type error
         super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{source_type}' to '{target_type}'")
         
     def __var_def(self, var_ast):
@@ -267,6 +306,20 @@ class Interpreter(InterpreterBase):
             return Value(Type.BOOL, expr_ast.get("val"))
         if expr_ast.elem_type == InterpreterBase.VAR_NODE:
             var_name = expr_ast.get("name")
+
+            # 🍅: DO I NEED THIS FOR THE STRUCT FIELD ASSIGNMENT??
+            # check if var name is a struct field
+            if "." in var_name:
+                struct_var_name, field_name = var_name.split('.')
+                # get struct instance from the env
+                struct_instance = self.env.get(struct_var_name)
+                if struct_instance is None or struct_instance.type() == Type.NIL:
+                    super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil reference: struct_var_name = '{struct_var_name}'.")
+                if not isinstance (struct_instance, StructValue):
+                    super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
+                return struct_instance.get_field(field_name)
+
+            # regular var access
             val = self.env.get(var_name)
             if val is None:
                 super().error(ErrorType.NAME_ERROR, f"Variable {var_name} not found")
@@ -279,6 +332,14 @@ class Interpreter(InterpreterBase):
             return self.__eval_unary(expr_ast, Type.INT, lambda x: -1 * x)
         if expr_ast.elem_type == Interpreter.NOT_NODE:
             return self.__eval_unary(expr_ast, Type.BOOL, lambda x: not x)
+        if expr_ast.elem_type == InterpreterBase.NEW_NODE:
+            struct_type_name = expr_ast.get("var_type")
+            if struct_type_name not in self.struct_definitions:
+                super().error(ErrorType.TYPE_ERROR, f"Unknown struct type: '{struct_type_name}'")
+            # create a new instance of struct w default vals
+            struct_type = self.struct_definitions[struct_type_name]
+            struct_instance = StructValue(struct_type, self.struct_definitions)
+            return struct_instance
 
     def __eval_op(self, arith_ast):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
@@ -425,13 +486,6 @@ class Interpreter(InterpreterBase):
 
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
-    # def __do_return(self, return_ast):
-    #     expr_ast = return_ast.get("expression")
-    #     if expr_ast is None:
-    #         return (ExecStatus.RETURN, Interpreter.VOID_VALUE) # for void funcs
-    #     value_obj = copy.copy(self.__eval_expr(expr_ast))
-    #     return (ExecStatus.RETURN, value_obj)
-
     def __do_return(self, return_ast, return_type):
         expr_ast = return_ast.get("expression")
 
@@ -464,7 +518,6 @@ class Interpreter(InterpreterBase):
 
         return (ExecStatus.RETURN, return_val_obj)
 
-
     def __validate_func_types(self, param_types, return_type):
         # 🍅 🍅 🍅 🍅 🍅 🍅 🍅 🍅 🍅 🍅 IMPLEMENT STRUCTS LATER
         valid_types = ["int", "string", "bool", "void"] + list(self.struct_definitions.keys())
@@ -481,27 +534,6 @@ class Interpreter(InterpreterBase):
             super().error(
                 ErrorType.TYPE_ERROR,
                 f"Invalid return type: {return_type}")
-            
-    def define_struct(self, struct_name, fields):
-        if struct_name in self.struct_definitions:
-            raise ValueError(f"Struct '{struct_name}' is already defined.")
-        self.struct_definitions[struct_name] = StructType(struct_name, fields)
-
-    def create_struct_instance(self, struct_name):
-        if struct_name not in self.struct_definitions:
-            raise ValueError(f"Struct '{struct_name}' is not defined.")
-        struct_type = self.struct_definitions[struct_name]
-        return StructValue(struct_type)
-
-    def get_struct_field(self, struct_instance, field_name):
-        if not isinstance(struct_instance, StructValue):
-            raise TypeError("Expected a struct instance.")
-        return struct_instance.get_field(field_name)
-
-    def set_struct_field(self, struct_instance, field_name, value):
-        if not isinstance(struct_instance, StructValue):
-            raise TypeError("Expected a struct instance.")
-        struct_instance.set_field(field_name, value)
 
     def get_default_val(self, var_name, var_type):
         if var_type == "int":
@@ -511,6 +543,7 @@ class Interpreter(InterpreterBase):
         elif var_type == "bool":
             default_value = Value(Type.BOOL, False)
         elif var_type in self.struct_definitions:
+            # 🍅: should be fine actually?
             default_value = Interpreter.NIL_VALUE
         elif var_type == "void":
             return Interpreter.VOID_VALUE
@@ -519,21 +552,37 @@ class Interpreter(InterpreterBase):
             super().error(ErrorType.TYPE_ERROR, f"Unknown type '{var_type}' for variable '{var_name}'")
         return default_value
 
+    def __set_up_struct_definitions(self, ast):
+        for struct_node in ast.get("structs"):
+            struct_name = struct_node.get("name")
+            fields = {}
+            for field_node in struct_node.get("fields"):
+                field_name = field_node.get("name")
+                field_type = field_node.get("var_type")
+                fields[field_name] = field_type
+            self.struct_definitions[struct_name] = StructType(struct_name, fields)
+
 
 def main():
   program = """
-func bar() : int {
-  return;  /* no return value specified - returns 0 */
+
+struct Person {
+  name: string;
+  kitty: Cat;
 }
-func bletch() : bool {
-    print("hi");
-    /* no explicit return; bletch must return default bool of false */
+
+struct Cat {
+  name: string;
 }
+
 func main() : void {
-    var val: int;
-    val = bar();
-    print(val);  /* prints 0 */
-    print(bletch()); /* prints false */
+    var p : Person;
+    p = new Person;
+    p.name = "Michelle";
+    p.kitty.name = "Lanmei";
+    print(p.name);
+    print(p.kitty.name);
+    return;
 }
                 """
   interpreter = Interpreter()
