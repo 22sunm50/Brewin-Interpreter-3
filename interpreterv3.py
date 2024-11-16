@@ -136,9 +136,19 @@ class Interpreter(InterpreterBase):
                     # pass by ref (struct) 🍅 🍅 🍅 OBJ REF???? 🍅 🍅 🍅
                     prepared_args[arg_name] = actual_value
             # CASE 2: coercion: int -> bool
-            elif expected_type == Type.BOOL and actual_type == Type.INT:
-                coerced_value = Value(Type.BOOL, actual_value.value() != 0)
-                prepared_args[arg_name] = coerced_value
+            # ⭐️ ⭐️ ⭐️ OLD CODE:
+            # elif expected_type == Type.BOOL and actual_type == Type.INT:
+            #     coerced_value = Value(Type.BOOL, actual_value.value() != 0)
+            #     prepared_args[arg_name] = coerced_value
+            elif expected_type == Type.BOOL:
+                actual_value = self.coerce_int_to_bool(actual_value)
+                # TYPE CHECK: after possible coercion
+                if actual_value.type() != expected_type:
+                    super().error(
+                        ErrorType.TYPE_ERROR,
+                        f"Type mismatch: Expected {expected_type}, got {actual_value.type()} for argument '{arg_name}'")
+                prepared_args[arg_name] = actual_value
+
             # CASE 3:: nil can be assigned to struct param
             elif expected_type in self.struct_definitions and actual_type == Type.NIL:
                 prepared_args[arg_name] = actual_value
@@ -230,62 +240,20 @@ class Interpreter(InterpreterBase):
             expected_field_type = struct_type.fields[field_name]
             value_type = value_obj.type()
 
-            # # TYPE CHECK: for field assignment
-            # if value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
-            #     super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{value_type}' to field '{field_name}' of type '{expected_field_type}'.")
-
             if isinstance(value_obj, StructValue):
                 if value_obj.struct_type.name != expected_field_type:
                     super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign struct instance of type '{value_obj.struct_type.name}' to field '{field_name}' of type '{expected_field_type}'.")
+            
+            # coercion: int -> bool
+            elif expected_field_type == Type.BOOL:
+                value_obj = self.coerce_int_to_bool(value_obj)
+            
             elif value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
                 super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{value_type}' to field '{field_name}' of type '{expected_field_type}'.")
-
-
 
             # perform the field assignment
             struct_instance.set_field(field_name, value_obj)
             return
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-            # struct_var_name, field_name = var_name.split(".")
-
-            # # Retrieve the struct instance from the environment
-            # struct_instance = self.env.get(struct_var_name)
-
-            # if struct_instance is None or struct_instance.type() == Type.NIL:
-            #     super().error(ErrorType.FAULT_ERROR, f"Attempted to assign a field on a nil reference '{struct_var_name}'.")
-
-            # if not isinstance(struct_instance, StructValue):
-            #     super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
-
-            # # Get the expected field type from the struct definition
-            # struct_type = struct_instance.struct_type
-            # if field_name not in struct_type.fields:
-            #     super().error(ErrorType.NAME_ERROR, f"Field '{field_name}' does not exist in struct '{struct_type.name}'.")
-
-            # expected_field_type = struct_type.fields[field_name]
-            # value_type = value_obj.type()
-
-            # # TYPE CHECK: field assignment
-            # if value_type != expected_field_type and not (expected_field_type in self.struct_definitions and value_type == Type.NIL):
-            #     super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{value_type}' to field '{field_name}' of type '{expected_field_type}'.")
-
-            # # do field assignment
-            # struct_instance.set_field(field_name, value_obj)
-            # return
 
         # regular var assignment (non-struct)
         # target is the var being changed
@@ -316,7 +284,11 @@ class Interpreter(InterpreterBase):
 
         # CASE 4: coercion from int -> bool
         if target_type == Type.BOOL and source_type == Type.INT:
-            coerced_value = Value(Type.BOOL, value_obj.value() != 0)
+            coerced_value = self.coerce_int_to_bool(value_obj)
+            # ⭐️ ⭐️ ⭐️ regular type-checking logic
+            if target_type != coerced_value.type():
+                super().error(ErrorType.TYPE_ERROR, f"Type mismatch: Cannot assign '{source_type}' to '{target_type}'")
+
             self.env.set(var_name, coerced_value)
             return
 
@@ -365,21 +337,6 @@ class Interpreter(InterpreterBase):
 
                 return struct_instance.get_field(field_name)
 
-
-
-
-
-
-
-                # struct_var_name, field_name = var_name.split('.')
-                # # get struct instance from the env
-                # struct_instance = self.env.get(struct_var_name)
-                # if struct_instance is None or struct_instance.type() == Type.NIL:
-                #     super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil reference: struct_var_name = '{struct_var_name}'.")
-                # if not isinstance (struct_instance, StructValue):
-                #     super().error(ErrorType.TYPE_ERROR, f"Variable '{struct_var_name}' is not a struct.")
-                # return struct_instance.get_field(field_name)
-
             # regular var access
             val = self.env.get(var_name)
             if val is None:
@@ -405,6 +362,26 @@ class Interpreter(InterpreterBase):
     def __eval_op(self, arith_ast):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+        # ⭐️ ⭐️ ⭐️: coerce int -> bool for logical op
+        if arith_ast.elem_type in ["&&", "||"]:
+            left_value_obj = self.coerce_int_to_bool(left_value_obj)
+            right_value_obj = self.coerce_int_to_bool(right_value_obj)
+
+        # ⭐️ ⭐️ ⭐️: coerce int -> bool for equality checks
+        if arith_ast.elem_type in ["==", "!="]:
+            if left_value_obj.type() == Type.INT and right_value_obj.type() == Type.BOOL:
+                left_value_obj = self.coerce_int_to_bool(left_value_obj)
+            elif left_value_obj.type() == Type.BOOL and right_value_obj.type() == Type.INT:
+                right_value_obj = self.coerce_int_to_bool(right_value_obj)
+
+        # ⭐️ ⭐️ ⭐️: ERROR: unsuporrted coercions (ex: false < 5)
+        if arith_ast.elem_type not in ["==", "!=", "&&", "||"] and (
+            (left_value_obj.type() == Type.BOOL and right_value_obj.type() == Type.INT) or
+            (left_value_obj.type() == Type.INT and right_value_obj.type() == Type.BOOL)
+        ):
+            super().error(ErrorType.TYPE_ERROR, "Invalid coercion between int and bool for this operation")
+
+
         if not self.__compatible_types(
             arith_ast.elem_type, left_value_obj, right_value_obj
         ):
@@ -507,6 +484,8 @@ class Interpreter(InterpreterBase):
     def __do_if(self, if_ast):
         cond_ast = if_ast.get("condition")
         result = self.__eval_expr(cond_ast)
+        # ⭐️ ⭐️ ⭐️ coerce int -> bool if needed
+        result = self.coerce_int_to_bool(result)
         if result.type() != Type.BOOL:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -533,6 +512,8 @@ class Interpreter(InterpreterBase):
         run_for = Interpreter.TRUE_VALUE
         while run_for.value():
             run_for = self.__eval_expr(cond_ast)  # check for-loop condition
+            # ⭐️ ⭐️ ⭐️: coerce int -> bool if needed
+            run_for = self.coerce_int_to_bool(run_for)
             if run_for.type() != Type.BOOL:
                 super().error(
                     ErrorType.TYPE_ERROR,
@@ -637,26 +618,31 @@ class Interpreter(InterpreterBase):
 
         return struct_instance
 
+    def coerce_int_to_bool(self, value_obj):
+        if value_obj.type() == Type.INT:
+            return Value(Type.BOOL, value_obj.value() != 0)
+        return value_obj
+
 
 def main():
   program = """
 struct Cat {
-  name: string;
+  cute: bool;
 }
 
 struct Person {
-  name: string;
+  cool: bool;
   kitty: Cat;
 }
 
 func main() : void {
     var p : Person;
     p = new Person;
-    p.name = "Michelle";
-    print(p.name);
+    p.cool = 5;
+    print(p.cool);          // true
     p.kitty = new Cat;
-    p.kitty.name = "Lanmei";
-    print(p.kitty.name);
+    p.kitty.cute = 0;
+    print(p.kitty.cute);    // false
     return;
 }
                 """
