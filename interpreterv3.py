@@ -32,8 +32,8 @@ class Interpreter(InterpreterBase):
 
     def run(self, program):
         ast = parse_program(program)
-        self.__set_up_function_table(ast)
         self.__set_up_struct_definitions(ast)
+        self.__set_up_function_table(ast)
         # print(f"🏡: self.struct_definitions {self.struct_definitions}")
         self.env = EnvironmentManager()
         self.__call_func_aux("main", [])
@@ -126,15 +126,31 @@ class Interpreter(InterpreterBase):
             expected_type = param_types[i]
             arg_name = formal_arg.get("name")
 
+            # print(f"📳: actual_type = {actual_type}")
+            # print(f"📳: expected_type = {expected_type}")
+            # print(f"📳: actual_value.struct_type.name = {actual_value.struct_type.name}")
             # TYPE CHECKING:
             # CASE 1: same type, pass directly
-            if actual_type == expected_type:
-                if expected_type in ["int", "string", "bool"]: # primitive
-                    # pass by value (copy)
+            if actual_type == expected_type or (
+                expected_type in self.struct_definitions and 
+                actual_value.struct_type.name in self.struct_definitions and 
+                actual_value.struct_type.name == expected_type
+            ):
+                if expected_type in ["int", "string", "bool"]:  # primitive
                     prepared_args[arg_name] = copy.copy(actual_value)
-                else: # struct
-                    # pass by ref (struct) 🍅 🍅 🍅 OBJ REF???? 🍅 🍅 🍅
+                else:  # struct (pass by reference)
                     prepared_args[arg_name] = actual_value
+
+
+            # ⭐️ ⭐️ ⭐️: OLD CODE
+            # if actual_type == expected_type:
+            #     if expected_type in ["int", "string", "bool"]: # primitive
+            #         # pass by value (copy)
+            #         prepared_args[arg_name] = copy.copy(actual_value)
+            #     else: # struct
+            #         # pass by ref (struct) 🍅 🍅 🍅 OBJ REF???? 🍅 🍅 🍅
+            #         prepared_args[arg_name] = actual_value
+
             # CASE 2: coercion: int -> bool
             elif expected_type == Type.BOOL:
                 actual_value = self.coerce_int_to_bool(actual_value)
@@ -627,21 +643,23 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct Dog {
+struct Person {
   name: string;
+  age: int;
+  student: bool;
 }
 
 func main() : void {
-    var d1: Dog;
-    var d2: Dog;
+  var p: Person;
+  p = new Person;
+  p.name = "Carey";
+  p.age = 21;
+  p.student = false;
+  foo(p);
+}
 
-    d1 = new Dog;
-    d2 = new Dog;
-    print("HI");
-
-    print(d1 == d2);  /* Expected: false */
-    d2 = d1;
-    print(d1 == d2);  /* Expected: true */
+func foo(p : Person) : void {
+  print(p.name, " is ", p.age, " years old.");
 }
                 """
   interpreter = Interpreter()
