@@ -130,6 +130,7 @@ class Interpreter(InterpreterBase):
             # CASE 1: same type, pass directly
             if actual_type == expected_type or (
                 expected_type in self.struct_definitions and 
+                isinstance(actual_value, StructValue) and
                 actual_value.struct_type.name in self.struct_definitions and 
                 actual_value.struct_type.name == expected_type
             ):
@@ -179,11 +180,6 @@ class Interpreter(InterpreterBase):
             return_val_obj = self.__get_default_val("return", return_type)
 
         # CHECK: return type
-        # if return_type != "void" and (return_val_obj.value() == Interpreter.VOID_VALUE.value() or return_val_obj.type() != return_type): # 🍅 🍅 🍅: what should return val be if void??
-        #     super().error(
-        #         ErrorType.TYPE_ERROR,
-        #         f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.type()}")
-
         if return_type != "void":
             if isinstance(return_val_obj, StructValue):
                 if return_val_obj.struct_type.name != return_type:
@@ -652,30 +648,32 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct dog {
-    bark: int;
-    bite: int;
+struct animal {
+    name : string;
+    noise : string;
+    color : string;
+    extinct : bool;
+    ears: int; 
 }
-
-func foo(d: dog) : dog {  /* d holds the same object reference that the koda variable holds */
-    d.bark = 10;
-    print("HOLA");
-    return d;  		/* this returns the same object reference that the koda variable holds */
-}
-
 func main() : void {
-    var koda: dog;
-    var kippy: dog;
-    koda = new dog;
-    kippy = foo(koda);	/* kippy holds the same object reference as koda */
-    print ("HI");
-    kippy.bite = 20;
-    print(koda.bark, " ", koda.bite); /* prints 10 20 */
+    var pig : animal;
+    var noise : string;
+    noise = make_pig(pig);
+    print(noise);
+}
+func make_pig(a : animal) : string{
+    if (a == nil){
+        print("making a pig");
+        a = new animal;
+    }
+    a.noise = "oink";
+    return a.noise;
 }
 
 /*
 *OUT*
-10 20
+making a pig
+oink
 *OUT*
 */
                 """
