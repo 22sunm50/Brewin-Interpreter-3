@@ -194,13 +194,16 @@ class Interpreter(InterpreterBase):
                     ErrorType.TYPE_ERROR,
                     f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.type()}")
 
-
         return return_val_obj if return_type != "void" else Interpreter.VOID_VALUE
 
     def __call_print(self, args):
         output = ""
         for arg in args:
             result = self.__eval_expr(arg)  # result is a Value object
+
+            # CHECK: cannot print type VOID
+            if result.type() == Type.VOID:
+                super().error(ErrorType.TYPE_ERROR, "Cannot print a void value")
 
             # CHECK: val is of type nil
             if result.type() == Type.NIL:
@@ -675,19 +678,12 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func foo(): void {
-  return 3;
+func test() : void {
+    return;
 }
-
-func main(): void {
-  foo();
+func main() : void {
+    print(test());
 }
-
-/*
-*OUT*
-ErrorType.TYPE_ERROR
-*OUT*
-*/
                 """
   interpreter = Interpreter()
   interpreter.run(program)
