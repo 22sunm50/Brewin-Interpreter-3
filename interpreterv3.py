@@ -136,10 +136,6 @@ class Interpreter(InterpreterBase):
                     # pass by ref (struct) 🍅 🍅 🍅 OBJ REF???? 🍅 🍅 🍅
                     prepared_args[arg_name] = actual_value
             # CASE 2: coercion: int -> bool
-            # ⭐️ ⭐️ ⭐️ OLD CODE:
-            # elif expected_type == Type.BOOL and actual_type == Type.INT:
-            #     coerced_value = Value(Type.BOOL, actual_value.value() != 0)
-            #     prepared_args[arg_name] = coerced_value
             elif expected_type == Type.BOOL:
                 actual_value = self.coerce_int_to_bool(actual_value)
                 # TYPE CHECK: after possible coercion
@@ -149,7 +145,7 @@ class Interpreter(InterpreterBase):
                         f"Type mismatch: Expected {expected_type}, got {actual_value.type()} for argument '{arg_name}'")
                 prepared_args[arg_name] = actual_value
 
-            # CASE 3:: nil can be assigned to struct param
+            # CASE 3: nil can be assigned to struct param
             elif expected_type in self.struct_definitions and actual_type == Type.NIL:
                 prepared_args[arg_name] = actual_value
             # Type Mismatch
@@ -198,9 +194,14 @@ class Interpreter(InterpreterBase):
         output = ""
         for arg in args:
             result = self.__eval_expr(arg)  # result is a Value object
-            output = output + get_printable(result)
+
+            # CHECK: val is of type nil
+            if result.type() == Type.NIL:
+                output += "nil"
+            else:
+                output = output + get_printable(result)
         super().output(output)
-        return Interpreter.NIL_VALUE
+        # return Interpreter.NIL_VALUE # bc print is now VOID!!
 
     def __call_input(self, name, args):
         if args is not None and len(args) == 1:
@@ -362,39 +363,41 @@ class Interpreter(InterpreterBase):
     def __eval_op(self, arith_ast):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
+        op = arith_ast.elem_type
+
         # ⭐️ ⭐️ ⭐️: coerce int -> bool for logical op
-        if arith_ast.elem_type in ["&&", "||"]:
+        if op in ["&&", "||"]:
             left_value_obj = self.coerce_int_to_bool(left_value_obj)
             right_value_obj = self.coerce_int_to_bool(right_value_obj)
 
-        # ⭐️ ⭐️ ⭐️: coerce int -> bool for equality checks
-        if arith_ast.elem_type in ["==", "!="]:
+        # ⭐️ ⭐️ ⭐️: coerce int -> bool for equality
+        if op in ["==", "!="]:
             if left_value_obj.type() == Type.INT and right_value_obj.type() == Type.BOOL:
                 left_value_obj = self.coerce_int_to_bool(left_value_obj)
             elif left_value_obj.type() == Type.BOOL and right_value_obj.type() == Type.INT:
                 right_value_obj = self.coerce_int_to_bool(right_value_obj)
 
         # ⭐️ ⭐️ ⭐️: ERROR: unsuporrted coercions (ex: false < 5)
-        if arith_ast.elem_type not in ["==", "!=", "&&", "||"] and (
+        if op not in ["==", "!=", "&&", "||"] and (
             (left_value_obj.type() == Type.BOOL and right_value_obj.type() == Type.INT) or
             (left_value_obj.type() == Type.INT and right_value_obj.type() == Type.BOOL)
         ):
-            super().error(ErrorType.TYPE_ERROR, "Invalid coercion between int and bool for this operation")
+            super().error(ErrorType.TYPE_ERROR, f"Invalid coercion int -> bool for op {op}")
 
 
         if not self.__compatible_types(
-            arith_ast.elem_type, left_value_obj, right_value_obj
+            op, left_value_obj, right_value_obj
         ):
             super().error(
                 ErrorType.TYPE_ERROR,
-                f"Incompatible types for {arith_ast.elem_type} operation",
+                f"Incompatible types for {op} operation",
             )
-        if arith_ast.elem_type not in self.op_to_lambda[left_value_obj.type()]:
+        if op not in self.op_to_lambda[left_value_obj.type()]:
             super().error(
                 ErrorType.TYPE_ERROR,
-                f"Incompatible operator {arith_ast.elem_type} for type {left_value_obj.type()}",
+                f"Incompatible operator {op} for type {left_value_obj.type()}",
             )
-        f = self.op_to_lambda[left_value_obj.type()][arith_ast.elem_type]
+        f = self.op_to_lambda[left_value_obj.type()][op]
         return f(left_value_obj, right_value_obj)
 
     def __compatible_types(self, oper, obj1, obj2):
@@ -538,7 +541,7 @@ class Interpreter(InterpreterBase):
         return_val_obj = copy.copy(self.__eval_expr(expr_ast))
         return_val_type = return_val_obj.type()
 
-        # Type Checking
+        # TYPE CHECKING
         # CASE 1: exact type match
         if return_val_type == return_type:
             return (ExecStatus.RETURN, return_val_obj)
@@ -552,11 +555,10 @@ class Interpreter(InterpreterBase):
         if return_type in self.struct_definitions and return_val_type == Type.NIL:
             return (ExecStatus.RETURN, return_val_obj)
 
-        # If none of the cases match, raise a type error
+        # if none of the cases match, raise a type error
         super().error(
             ErrorType.TYPE_ERROR,
-            f"Type mismatch in return value: Expected {return_type}, got {return_val_type}"
-        )
+            f"Type mismatch in return value: Expected {return_type}, got {return_val_type}")
 
         return (ExecStatus.RETURN, return_val_obj)
 
@@ -623,27 +625,23 @@ class Interpreter(InterpreterBase):
             return Value(Type.BOOL, value_obj.value() != 0)
         return value_obj
 
-
 def main():
   program = """
-struct Cat {
-  cute: bool;
-}
-
-struct Person {
-  cool: bool;
-  kitty: Cat;
+struct Dog {
+  name: string;
 }
 
 func main() : void {
-    var p : Person;
-    p = new Person;
-    p.cool = 5;
-    print(p.cool);          // true
-    p.kitty = new Cat;
-    p.kitty.cute = 0;
-    print(p.kitty.cute);    // false
-    return;
+    var d1: Dog;
+    var d2: Dog;
+
+    d1 = new Dog;
+    d2 = new Dog;
+    print("HI");
+
+    print(d1 == d2);  /* Expected: false */
+    d2 = d1;
+    print(d1 == d2);  /* Expected: true */
 }
                 """
   interpreter = Interpreter()
