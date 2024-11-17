@@ -179,10 +179,22 @@ class Interpreter(InterpreterBase):
             return_val_obj = self.__get_default_val("return", return_type)
 
         # CHECK: return type
-        if return_type != "void" and (return_val_obj.value() == Interpreter.VOID_VALUE.value() or return_val_obj.type() != return_type): # 🍅 🍅 🍅: what should return val be if void??
-            super().error(
-                ErrorType.TYPE_ERROR,
-                f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.type()}")
+        # if return_type != "void" and (return_val_obj.value() == Interpreter.VOID_VALUE.value() or return_val_obj.type() != return_type): # 🍅 🍅 🍅: what should return val be if void??
+        #     super().error(
+        #         ErrorType.TYPE_ERROR,
+        #         f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.type()}")
+
+        if return_type != "void":
+            if isinstance(return_val_obj, StructValue):
+                if return_val_obj.struct_type.name != return_type:
+                    super().error(
+                        ErrorType.TYPE_ERROR,
+                        f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.struct_type.name}")
+            elif return_val_obj.value() == Interpreter.VOID_VALUE.value() or return_val_obj.type() != return_type:
+                super().error(
+                    ErrorType.TYPE_ERROR,
+                    f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.type()}")
+
 
         return return_val_obj if return_type != "void" else Interpreter.VOID_VALUE
 
@@ -275,7 +287,7 @@ class Interpreter(InterpreterBase):
             return
 
         # CASE 3: struct can be assigned nil
-        if target_type in self.struct_definitions or source_type == Type.NIL: # 🍅 🍅 🍅: or? not necessarily nil i think
+        if target_type in self.struct_definitions or source_type == Type.NIL:
             self.env.set(var_name, value_obj)
             return
 
@@ -551,13 +563,18 @@ class Interpreter(InterpreterBase):
         # CASE 1: exact type match
         if return_val_type == return_type:
             return (ExecStatus.RETURN, return_val_obj)
+        
+        # CASE 2: return struct instance (by obj ref)
+        if return_type in self.struct_definitions and isinstance(return_val_obj, StructValue):
+            if return_val_obj.struct_type.name == return_type:
+                return (ExecStatus.RETURN, return_val_obj)
 
-        # CASE 2: coercion from int -> bool
+        # CASE 3: coercion from int -> bool
         if return_type == Type.BOOL and return_val_type == Type.INT:
             coerced_value = Value(Type.BOOL, return_val_obj.value() != 0)
             return (ExecStatus.RETURN, coerced_value)
 
-        # CASE 3: return nil for a user-defined structure
+        # CASE 4: return nil for a user-defined structure
         if return_type in self.struct_definitions and return_val_type == Type.NIL:
             return (ExecStatus.RETURN, return_val_obj)
 
@@ -635,20 +652,30 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct s {
-  a:int;
+struct dog {
+    bark: int;
+    bite: int;
 }
 
-func main() : int {
-  var x: s;
-  x = new s;
-  x = nil;
-  print(x.a);
+func foo(d: dog) : dog {  /* d holds the same object reference that the koda variable holds */
+    d.bark = 10;
+    print("HOLA");
+    return d;  		/* this returns the same object reference that the koda variable holds */
+}
+
+func main() : void {
+    var koda: dog;
+    var kippy: dog;
+    koda = new dog;
+    kippy = foo(koda);	/* kippy holds the same object reference as koda */
+    print ("HI");
+    kippy.bite = 20;
+    print(koda.bark, " ", koda.bite); /* prints 10 20 */
 }
 
 /*
 *OUT*
-ErrorType.FAULT_ERROR
+10 20
 *OUT*
 */
                 """
