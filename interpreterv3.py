@@ -34,7 +34,6 @@ class Interpreter(InterpreterBase):
         ast = parse_program(program)
         self.__set_up_struct_definitions(ast)
         self.__set_up_function_table(ast)
-        # print(f"🏡: self.struct_definitions {self.struct_definitions}")
         self.env = EnvironmentManager()
         self.__call_func_aux("main", [])
 
@@ -95,9 +94,9 @@ class Interpreter(InterpreterBase):
         elif statement.elem_type == InterpreterBase.RETURN_NODE:
             status, return_val = self.__do_return(statement, return_type)
         elif statement.elem_type == Interpreter.IF_NODE:
-            status, return_val = self.__do_if(statement)
+            status, return_val = self.__do_if(statement, return_type)
         elif statement.elem_type == Interpreter.FOR_NODE:
-            status, return_val = self.__do_for(statement)
+            status, return_val = self.__do_for(statement, return_type)
 
         return (status, return_val)
     
@@ -172,6 +171,7 @@ class Interpreter(InterpreterBase):
             self.env.create(arg_name, value)
 
         # execute rest of func statements
+        # 🌷 🌷 🌷 🌷 🌷: ~ BREAK POINT ~ GOING TO RUN STATEMENTS INSIDE CALL FUNC AUX
         status, return_val_obj = self.__run_statements(func_ast.get("statements"), return_type)
         self.env.pop_func()
 
@@ -389,12 +389,19 @@ class Interpreter(InterpreterBase):
                 right_value_obj = self.coerce_int_to_bool(right_value_obj)
 
             # CHECK: invalid comparison w/ nil
-            if (left_value_obj.type() == Type.NIL and right_value_obj.type() not in self.struct_definitions and right_value_obj.type() != Type.NIL) or \
-                (right_value_obj.type() == Type.NIL and left_value_obj.type() not in self.struct_definitions and left_value_obj.type() != Type.NIL):
-                    super().error(ErrorType.TYPE_ERROR, "Invalid comparison between nil and non-struct type")
+            # ⭐️: OLD CODE:
+            # if (left_value_obj.type() == Type.NIL and right_value_obj.type() not in self.struct_definitions and right_value_obj.type() != Type.NIL) or \
+            #     (right_value_obj.type() == Type.NIL and left_value_obj.type() not in self.struct_definitions and left_value_obj.type() != Type.NIL):
+            #         super().error(ErrorType.TYPE_ERROR, "Invalid comparison between nil and non-struct type")
+            if left_value_obj.type() == Type.NIL or right_value_obj.type() == Type.NIL:
+                # if both are nil, return true for equality and false for inequality
+                if left_value_obj.type() == Type.NIL and right_value_obj.type() == Type.NIL:
+                    return Value(Type.BOOL, op == "==")
+                # if one is nil and the other is not a struct, return false for equality and true for inequality
+                if left_value_obj.type() != right_value_obj.type():
+                    return Value(Type.BOOL, op == "!=")
 
-
-        # ⭐️ ⭐️ ⭐️: ERROR: unsuporrted coercions (ex: false < 5)
+        # ERROR: unsuporrted coercions (ex: false < 5)
         if op not in ["==", "!=", "&&", "||"] and (
             (left_value_obj.type() == Type.BOOL and right_value_obj.type() == Type.INT) or
             (left_value_obj.type() == Type.INT and right_value_obj.type() == Type.BOOL)
@@ -429,7 +436,7 @@ class Interpreter(InterpreterBase):
         # coercion: int -> bool for NOT operation
         if arith_ast.elem_type == Interpreter.NOT_NODE and value_obj.type() == Type.INT:
             value_obj = self.coerce_int_to_bool(value_obj)
-            
+
         if value_obj.type() != t:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -506,10 +513,10 @@ class Interpreter(InterpreterBase):
             Type.BOOL, x.type() != y.type() or x.value() != y.value()
         )
 
-    def __do_if(self, if_ast):
+    def __do_if(self, if_ast, return_type=None):
         cond_ast = if_ast.get("condition")
         result = self.__eval_expr(cond_ast)
-        # ⭐️ ⭐️ ⭐️ coerce int -> bool if needed
+        # coerce: int -> bool if needed
         result = self.coerce_int_to_bool(result)
         if result.type() != Type.BOOL:
             super().error(
@@ -518,17 +525,17 @@ class Interpreter(InterpreterBase):
             )
         if result.value():
             statements = if_ast.get("statements")
-            status, return_val = self.__run_statements(statements)
+            status, return_val = self.__run_statements(statements, return_type) # 🍅 🍅 🍅: ADDED A return_type parameter into my do_if
             return (status, return_val)
         else:
             else_statements = if_ast.get("else_statements")
             if else_statements is not None:
-                status, return_val = self.__run_statements(else_statements)
+                status, return_val = self.__run_statements(else_statements, return_type)
                 return (status, return_val)
 
         return (ExecStatus.CONTINUE, Interpreter.NIL_VALUE)
 
-    def __do_for(self, for_ast):
+    def __do_for(self, for_ast, return_type=None):
         init_ast = for_ast.get("init") 
         cond_ast = for_ast.get("condition")
         update_ast = for_ast.get("update") 
@@ -546,7 +553,7 @@ class Interpreter(InterpreterBase):
                 )
             if run_for.value():
                 statements = for_ast.get("statements")
-                status, return_val = self.__run_statements(statements)
+                status, return_val = self.__run_statements(statements, return_type)
                 if status == ExecStatus.RETURN:
                     return status, return_val
                 self.__run_statement(update_ast)  # update counter variable
@@ -564,6 +571,11 @@ class Interpreter(InterpreterBase):
         return_val_type = return_val_obj.type()
 
         # TYPE CHECKING
+
+        # CHECK: return type
+        if return_type is None or return_type == "void":
+            return (ExecStatus.RETURN, Interpreter.VOID_VALUE)
+        
         # CASE 1: exact type match
         if return_val_type == return_type:
             return (ExecStatus.RETURN, return_val_obj)
@@ -575,7 +587,7 @@ class Interpreter(InterpreterBase):
 
         # CASE 3: coercion from int -> bool
         if return_type == Type.BOOL and return_val_type == Type.INT:
-            coerced_value = Value(Type.BOOL, return_val_obj.value() != 0)
+            coerced_value = self.coerce_int_to_bool(return_val_obj)
             return (ExecStatus.RETURN, coerced_value)
 
         # CASE 4: return nil for a user-defined structure
@@ -656,15 +668,57 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func main(): void {
- var a: bool;
- a = !5;
- print(a);
+struct animal {
+    name : string;
+    extinct : bool;
+    ears: int; 
+}
+func main() : void {
+   var pig : animal;
+   var ret: bool;
+   var hm : animal;
+   ret = is_extinct(pig);
+   print(ret);
+   pig = new animal;
+   pig.extinct = true;
+   ret = is_extinct(pig);
+   print(ret);
+   hm = destroy_animals("pig", pig);
+   print(pig.extinct);
+   print(hm);
+}
+func is_extinct(p : animal) : bool {
+  if (p == nil){
+    print("i go in here first");
+    return 0;
+  }
+  else{
+    return p.extinct;
+  }
+}
+func destroy_animals(name: string, p : animal) : animal{
+  if (p==nil){
+     p = new animal;
+  }
+  name = inputs("What animal do you want to destroy?");
+  p.name = name;
+  p.extinct = true;
+  print("Destroyed animal ", p.name);
+  return nil;
 }
 
 /*
+*IN*
+pig
+*IN*
 *OUT*
+i go in here first
 false
+true
+What animal do you want to destroy?
+Destroyed animal pig
+true
+nil
 *OUT*
 */
                 """
