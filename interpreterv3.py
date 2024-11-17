@@ -176,7 +176,7 @@ class Interpreter(InterpreterBase):
 
         # handle default ret val if the func runs to completion
         if status != ExecStatus.RETURN:
-            return_val_obj = self.get_default_val("return", return_type)
+            return_val_obj = self.__get_default_val("return", return_type)
 
         # CHECK: return type
         if return_type != "void" and (return_val_obj.value() == Interpreter.VOID_VALUE.value() or return_val_obj.type() != return_type): # 🍅 🍅 🍅: what should return val be if void??
@@ -275,7 +275,7 @@ class Interpreter(InterpreterBase):
             return
 
         # CASE 3: struct can be assigned nil
-        if target_type in self.struct_definitions and source_type == Type.NIL: # 🍅 🍅 🍅: or? not necessarily nil i think
+        if target_type in self.struct_definitions or source_type == Type.NIL: # 🍅 🍅 🍅: or? not necessarily nil i think
             self.env.set(var_name, value_obj)
             return
 
@@ -302,7 +302,7 @@ class Interpreter(InterpreterBase):
             super().error(ErrorType.TYPE_ERROR, f"Invalid type '{var_type}' for variable '{var_name}'")
 
         # get default val based on type
-        default_value = self.get_default_val(var_name, var_type)
+        default_value = self.__get_default_val(var_name, var_type)
 
         # create the var in the env w the default val
         if not self.env.create(var_name, default_value):
@@ -360,6 +360,10 @@ class Interpreter(InterpreterBase):
         left_value_obj = self.__eval_expr(arith_ast.get("op1"))
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
         op = arith_ast.elem_type
+
+        # CHECK: invalid comparison w/ VOID
+        if left_value_obj.type() == "void" or right_value_obj.type() == "void":
+            super().error(ErrorType.TYPE_ERROR, "Invalid comparison involving void type")
 
         if op in ["&&", "||"]:
             # coerce int -> bool for logical op
@@ -538,7 +542,7 @@ class Interpreter(InterpreterBase):
 
         # if there is no return expression, return the default value for the return type
         if expr_ast is None:
-            return (ExecStatus.RETURN, self.get_default_val("return", return_type))
+            return (ExecStatus.RETURN, self.__get_default_val("return", return_type))
 
         return_val_obj = copy.copy(self.__eval_expr(expr_ast))
         return_val_type = return_val_obj.type()
@@ -581,7 +585,7 @@ class Interpreter(InterpreterBase):
                 ErrorType.TYPE_ERROR,
                 f"Invalid return type: {return_type}")
 
-    def get_default_val(self, var_name, var_type):
+    def __get_default_val(self, var_name, var_type):
         if var_type == "int":
             default_value = Value(Type.INT, 0)
         elif var_type == "string":
@@ -611,10 +615,12 @@ class Interpreter(InterpreterBase):
     def __resolve_nested_struct(self, field_path):
         struct_instance = self.env.get(field_path[0])
 
-        # Traverse each field in the path
+        # traverse each field in the path
         for field_name in field_path[1:]:
+            # CHECK: if the struct instance is nil before accessing the field
             if struct_instance is None or struct_instance.type() == Type.NIL:
                 super().error(ErrorType.FAULT_ERROR, f"Attempted to access a field on a nil reference: '{field_name}'.")
+            
             if not isinstance(struct_instance, StructValue):
                 super().error(ErrorType.TYPE_ERROR, f"Variable '{field_name}' is not a struct.")
 
@@ -629,18 +635,20 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func main() : void {
-  var b: bool;
-  b = foo() == nil;
+struct s {
+  a:int;
 }
 
-func foo() : void {
-  var a: int;
+func main() : int {
+  var x: s;
+  x = new s;
+  x = nil;
+  print(x.a);
 }
 
 /*
 *OUT*
-ErrorType.TYPE_ERROR
+ErrorType.FAULT_ERROR
 *OUT*
 */
                 """
