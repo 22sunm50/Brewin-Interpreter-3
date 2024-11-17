@@ -237,6 +237,10 @@ class Interpreter(InterpreterBase):
             struct_instance = self.__resolve_nested_struct(field_path[:-1])
             field_name = field_path[-1]
 
+            # CHECK: if the base variable is undefined
+            if struct_instance is None:
+                super().error(ErrorType.NAME_ERROR, f"Undefined variable '{field_path[:-1]}' in field access '{var_name}'.")
+
             # CHECK: if the struct instance is valid
             if struct_instance is None or struct_instance.type() == Type.NIL:
                 super().error(ErrorType.FAULT_ERROR, f"Attempted to assign a field on a nil reference '{field_path[:-1]}'.")
@@ -678,11 +682,8 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func test() : void {
-    return;
-}
-func main() : void {
-    print(test());
+func main():void{
+    x.a = 2;
 }
                 """
   interpreter = Interpreter()
