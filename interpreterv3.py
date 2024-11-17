@@ -186,6 +186,9 @@ class Interpreter(InterpreterBase):
                     super().error(
                         ErrorType.TYPE_ERROR,
                         f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.struct_type.name}")
+            elif return_val_obj.type() == Type.NIL and return_type in self.struct_definitions:
+                # allow nil to be returned for a struct type
+                pass
             elif return_val_obj.value() == Interpreter.VOID_VALUE.value() or return_val_obj.type() != return_type:
                 super().error(
                     ErrorType.TYPE_ERROR,
@@ -648,32 +651,27 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct animal {
-    name : string;
-    noise : string;
-    color : string;
-    extinct : bool;
-    ears: int; 
+struct person {
+  name : string;
 }
-func main() : void {
-    var pig : animal;
-    var noise : string;
-    noise = make_pig(pig);
-    print(noise);
+func incorrect() : int{
+  var x : int;
+  return 9;
 }
-func make_pig(a : animal) : string{
-    if (a == nil){
-        print("making a pig");
-        a = new animal;
-    }
-    a.noise = "oink";
-    return a.noise;
+func correct() : person{
+  print("i should print");
+  return nil;
+}
+func main() : void{
+  print("hi");
+  correct();
+  incorrect();
 }
 
 /*
 *OUT*
-making a pig
-oink
+hi
+i should print
 *OUT*
 */
                 """
