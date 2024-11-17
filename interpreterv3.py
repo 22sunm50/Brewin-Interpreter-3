@@ -425,6 +425,11 @@ class Interpreter(InterpreterBase):
 
     def __eval_unary(self, arith_ast, t, f):
         value_obj = self.__eval_expr(arith_ast.get("op1"))
+
+        # coercion: int -> bool for NOT operation
+        if arith_ast.elem_type == Interpreter.NOT_NODE and value_obj.type() == Type.INT:
+            value_obj = self.coerce_int_to_bool(value_obj)
+            
         if value_obj.type() != t:
             super().error(
                 ErrorType.TYPE_ERROR,
@@ -651,27 +656,15 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct person {
-  name : string;
-}
-func incorrect() : int{
-  var x : int;
-  return 9;
-}
-func correct() : person{
-  print("i should print");
-  return nil;
-}
-func main() : void{
-  print("hi");
-  correct();
-  incorrect();
+func main(): void {
+ var a: bool;
+ a = !5;
+ print(a);
 }
 
 /*
 *OUT*
-hi
-i should print
+false
 *OUT*
 */
                 """
