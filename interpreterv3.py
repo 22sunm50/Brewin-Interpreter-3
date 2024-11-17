@@ -578,6 +578,9 @@ class Interpreter(InterpreterBase):
 
         # CHECK: return type
         if return_type is None or return_type == "void":
+            # if the function is void but there is a return expression, raise a TYPE_ERROR
+            if expr_ast is not None:
+                super().error(ErrorType.TYPE_ERROR, "Cannot return a value from a void function")
             return (ExecStatus.RETURN, Interpreter.VOID_VALUE)
         
         # CASE 1: exact type match
@@ -672,21 +675,12 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct circle{
-  r: int;
+func foo(): void {
+  return 3;
 }
 
-struct square {
-  s: int;
-}
-
-func main(): void{
-  var c: circle;
-  var s: square;
-
-  s = new square;
-  c = new circle;
-  print(c == s);
+func main(): void {
+  foo();
 }
 
 /*
