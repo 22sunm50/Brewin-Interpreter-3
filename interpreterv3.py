@@ -126,9 +126,6 @@ class Interpreter(InterpreterBase):
             expected_type = param_types[i]
             arg_name = formal_arg.get("name")
 
-            # print(f"📳: actual_type = {actual_type}")
-            # print(f"📳: expected_type = {expected_type}")
-            # print(f"📳: actual_value.struct_type.name = {actual_value.struct_type.name}")
             # TYPE CHECKING:
             # CASE 1: same type, pass directly
             if actual_type == expected_type or (
@@ -140,16 +137,6 @@ class Interpreter(InterpreterBase):
                     prepared_args[arg_name] = copy.copy(actual_value)
                 else:  # struct (pass by reference)
                     prepared_args[arg_name] = actual_value
-
-
-            # ⭐️ ⭐️ ⭐️: OLD CODE
-            # if actual_type == expected_type:
-            #     if expected_type in ["int", "string", "bool"]: # primitive
-            #         # pass by value (copy)
-            #         prepared_args[arg_name] = copy.copy(actual_value)
-            #     else: # struct
-            #         # pass by ref (struct) 🍅 🍅 🍅 OBJ REF???? 🍅 🍅 🍅
-            #         prepared_args[arg_name] = actual_value
 
             # CASE 2: coercion: int -> bool
             elif expected_type == Type.BOOL:
@@ -196,13 +183,6 @@ class Interpreter(InterpreterBase):
             super().error(
                 ErrorType.TYPE_ERROR,
                 f"Type mismatch in return value: Expected {return_type}, got {return_val_obj.type()}")
-
-        # # 🍅 🍅 🍅: NOT RLLY SURE HOW TO HANDLE VOID YET
-        # # CHECK: return type void
-        # if return_type == "void" and return_val_obj.value() != Interpreter.VOID_VALUE.value(): # 🍅 🍅 🍅: what should return val be if void??
-        #     super().error(
-        #         ErrorType.TYPE_ERROR,
-        #         f"Type mismatch in return value, return_type = {return_type}: Expected {Interpreter.VOID_VALUE.value()}, got return_val_obj = {return_val_obj.value()} and ")
 
         return return_val_obj if return_type != "void" else Interpreter.VOID_VALUE
 
@@ -381,17 +361,23 @@ class Interpreter(InterpreterBase):
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
         op = arith_ast.elem_type
 
-        # ⭐️ ⭐️ ⭐️: coerce int -> bool for logical op
         if op in ["&&", "||"]:
+            # coerce int -> bool for logical op
             left_value_obj = self.coerce_int_to_bool(left_value_obj)
             right_value_obj = self.coerce_int_to_bool(right_value_obj)
 
-        # ⭐️ ⭐️ ⭐️: coerce int -> bool for equality
         if op in ["==", "!="]:
+            # coerce int -> bool for equality
             if left_value_obj.type() == Type.INT and right_value_obj.type() == Type.BOOL:
                 left_value_obj = self.coerce_int_to_bool(left_value_obj)
             elif left_value_obj.type() == Type.BOOL and right_value_obj.type() == Type.INT:
                 right_value_obj = self.coerce_int_to_bool(right_value_obj)
+
+            # CHECK: invalid comparison w/ nil
+            if (left_value_obj.type() == Type.NIL and right_value_obj.type() not in self.struct_definitions and right_value_obj.type() != Type.NIL) or \
+                (right_value_obj.type() == Type.NIL and left_value_obj.type() not in self.struct_definitions and left_value_obj.type() != Type.NIL):
+                    super().error(ErrorType.TYPE_ERROR, "Invalid comparison between nil and non-struct type")
+
 
         # ⭐️ ⭐️ ⭐️: ERROR: unsuporrted coercions (ex: false < 5)
         if op not in ["==", "!=", "&&", "||"] and (
@@ -643,24 +629,20 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct Person {
-  name: string;
-  age: int;
-  student: bool;
-}
-
 func main() : void {
-  var p: Person;
-  p = new Person;
-  p.name = "Carey";
-  p.age = 21;
-  p.student = false;
-  foo(p);
+  var b: bool;
+  b = foo() == nil;
 }
 
-func foo(p : Person) : void {
-  print(p.name, " is ", p.age, " years old.");
+func foo() : void {
+  var a: int;
 }
+
+/*
+*OUT*
+ErrorType.TYPE_ERROR
+*OUT*
+*/
                 """
   interpreter = Interpreter()
   interpreter.run(program)
