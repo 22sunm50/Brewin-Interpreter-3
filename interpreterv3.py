@@ -389,10 +389,6 @@ class Interpreter(InterpreterBase):
                 right_value_obj = self.coerce_int_to_bool(right_value_obj)
 
             # CHECK: invalid comparison w/ nil
-            # ⭐️: OLD CODE:
-            # if (left_value_obj.type() == Type.NIL and right_value_obj.type() not in self.struct_definitions and right_value_obj.type() != Type.NIL) or \
-            #     (right_value_obj.type() == Type.NIL and left_value_obj.type() not in self.struct_definitions and left_value_obj.type() != Type.NIL):
-            #         super().error(ErrorType.TYPE_ERROR, "Invalid comparison between nil and non-struct type")
             if left_value_obj.type() == Type.NIL or right_value_obj.type() == Type.NIL:
                 # if both are nil, return true for equality and false for inequality
                 if left_value_obj.type() == Type.NIL and right_value_obj.type() == Type.NIL:
@@ -400,6 +396,14 @@ class Interpreter(InterpreterBase):
                 # if one is nil and the other is not a struct, return false for equality and true for inequality
                 if left_value_obj.type() != right_value_obj.type():
                     return Value(Type.BOOL, op == "!=")
+                
+            # ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️: compare b/w struct instances (by obj ref)
+            if isinstance(left_value_obj, StructValue) and isinstance(right_value_obj, StructValue):
+                if left_value_obj.struct_type.name != right_value_obj.struct_type.name:
+                    super().error(ErrorType.TYPE_ERROR, f"Invalid comparison of '{left_value_obj.struct_type.name}' and '{right_value_obj.struct_type.name}'")
+                # compare by ref 
+                are_equal = left_value_obj is right_value_obj
+                return Value(Type.BOOL, are_equal if op == "==" else not are_equal)
 
         # ERROR: unsuporrted coercions (ex: false < 5)
         if op not in ["==", "!=", "&&", "||"] and (
@@ -668,57 +672,26 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-struct animal {
-    name : string;
-    extinct : bool;
-    ears: int; 
+struct circle{
+  r: int;
 }
-func main() : void {
-   var pig : animal;
-   var ret: bool;
-   var hm : animal;
-   ret = is_extinct(pig);
-   print(ret);
-   pig = new animal;
-   pig.extinct = true;
-   ret = is_extinct(pig);
-   print(ret);
-   hm = destroy_animals("pig", pig);
-   print(pig.extinct);
-   print(hm);
+
+struct square {
+  s: int;
 }
-func is_extinct(p : animal) : bool {
-  if (p == nil){
-    print("i go in here first");
-    return 0;
-  }
-  else{
-    return p.extinct;
-  }
-}
-func destroy_animals(name: string, p : animal) : animal{
-  if (p==nil){
-     p = new animal;
-  }
-  name = inputs("What animal do you want to destroy?");
-  p.name = name;
-  p.extinct = true;
-  print("Destroyed animal ", p.name);
-  return nil;
+
+func main(): void{
+  var c: circle;
+  var s: square;
+
+  s = new square;
+  c = new circle;
+  print(c == s);
 }
 
 /*
-*IN*
-pig
-*IN*
 *OUT*
-i go in here first
-false
-true
-What animal do you want to destroy?
-Destroyed animal pig
-true
-nil
+ErrorType.TYPE_ERROR
 *OUT*
 */
                 """
