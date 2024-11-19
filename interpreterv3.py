@@ -379,6 +379,12 @@ class Interpreter(InterpreterBase):
         right_value_obj = self.__eval_expr(arith_ast.get("op2"))
         op = arith_ast.elem_type
 
+        # print(f"🐯: left_value_obj.type() = {left_value_obj.type()}")
+        # print(f"🐯: left_value_obj.value() = {left_value_obj.value()}")
+        # print(f"🐯: right_value_obj.type() = {right_value_obj.type()}")
+        # print(f"🐯: right_value_obj.value() = {right_value_obj.value()}")
+        # print(f"🐯: op = {op}")
+
         # CHECK: invalid comparison w/ VOID
         if left_value_obj.type() == "void" or right_value_obj.type() == "void":
             super().error(ErrorType.TYPE_ERROR, "Invalid comparison involving void type")
@@ -400,9 +406,19 @@ class Interpreter(InterpreterBase):
                 # if both are nil, return true for equality and false for inequality
                 if left_value_obj.type() == Type.NIL and right_value_obj.type() == Type.NIL:
                     return Value(Type.BOOL, op == "==")
+                # print(f"🐯: Did I get here")
                 # if one is nil and the other is not a struct, return false for equality and true for inequality
-                if left_value_obj.type() != right_value_obj.type():
+                if (not isinstance(left_value_obj, StructValue) and right_value_obj.type() == Type.NIL) or \
+                    (not isinstance(right_value_obj, StructValue) and left_value_obj.type() == Type.NIL):
+                    super().error(ErrorType.TYPE_ERROR, f"Invalid comparison of nil and non-struct type")
+                
+                # print(f"🐯: Did I get here")
+                if (isinstance(left_value_obj, StructValue) and right_value_obj.type() == Type.NIL) or \
+                    (isinstance(right_value_obj, StructValue) and left_value_obj.type() == Type.NIL):
                     return Value(Type.BOOL, op == "!=")
+                    
+                # if left_value_obj.type() != right_value_obj.type():
+                #     return Value(Type.BOOL, op == "!=")
                 
             # ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️ ⭐️: compare b/w struct instances (by obj ref)
             if isinstance(left_value_obj, StructValue) and isinstance(right_value_obj, StructValue):
@@ -682,8 +698,13 @@ class Interpreter(InterpreterBase):
 
 def main():
   program = """
-func main():void{
-    x.a = 2;
+struct Person {
+    name : string;
+}
+func main() : void{
+    var p : Person;
+    p = new Person;
+    print(p == nil);
 }
                 """
   interpreter = Interpreter()
