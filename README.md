@@ -62,3 +62,5 @@ To run a Brewin program within `interpreterv1.py` or `interpreterv2.py`:
   if __name__ == "__main__":
       main()
   ```
+## Test Cases
+For running test cases, please refer to this repository: https://github.com/22sunm50/Brewin-Interpreter-Tests
